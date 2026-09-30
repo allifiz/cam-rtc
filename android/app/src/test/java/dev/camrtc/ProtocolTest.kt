@@ -21,7 +21,8 @@ class ProtocolTest {
   }
  }
  @Test fun rtspStreamsFragmentedH264OverTcpAndRestarts() {
-  val server = CameraServer("127.0.0.1",640,480,24,{},{}); server.start()
+  val playing = java.util.concurrent.CountDownLatch(1)
+  val server = CameraServer("127.0.0.1",640,480,24,{},{ playing.countDown() }); server.start()
   try {
    DatagramSocket().use { probe ->
     probe.soTimeout=3000
@@ -51,6 +52,7 @@ class ProtocolTest {
     assertTrue(request("DESCRIBE").contains("H264/90000"))
     assertTrue(request("SETUP","Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n").contains("200 OK"))
     assertTrue(request("PLAY").contains("200 OK"))
+    assertTrue(playing.await(3,java.util.concurrent.TimeUnit.SECONDS))
     val nal=ByteArray(2500) { 3 }; nal[0]=0x65
     server.frame(byteArrayOf(0,0,0,1)+nal,1000000)
     val fragments=mutableListOf<ByteArray>(); var markers=0

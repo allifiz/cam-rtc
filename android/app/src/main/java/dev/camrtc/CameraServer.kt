@@ -24,7 +24,7 @@ class CameraServer(private val host: String, private val width: Int, private val
    for(port in listOf(8080,8554)) {
     val listener = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) }; listeners.add(listener)
     pool.execute { while(active) try {
-     val socket = listener.accept(); socket.soTimeout = 15000; sockets.add(socket)
+     val socket = listener.accept(); socket.reuseAddress = true; socket.soTimeout = 15000; sockets.add(socket)
      pool.execute { try { if(port == 8080) http(socket) else rtsp(socket) } catch(_: Exception) {} finally { sockets.remove(socket); socket.close() } }
     } catch(_: Exception) {} }
    }
@@ -165,7 +165,12 @@ class CameraServer(private val host: String, private val width: Int, private val
   }
   fun close() { socket.close(); sender.interrupt() }
  }
- override fun close() { active = false; discovery?.close(); listeners.forEach { it.close() }; sockets.forEach { it.close() }; clients.forEach { it.close() }; pool.shutdownNow() }
+ override fun close() {
+  active = false; discovery?.close(); listeners.forEach { it.close() }
+  sockets.forEach { it.close() }; clients.forEach { it.close() }; pool.shutdownNow()
+  pool.awaitTermination(2,TimeUnit.SECONDS)
+  sockets.forEach { it.close() }
+ }
  companion object {
   fun nals(bytes: ByteArray): List<ByteArray> {
    val starts = mutableListOf<Pair<Int,Int>>(); var i = 0
