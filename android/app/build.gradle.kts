@@ -4,6 +4,7 @@ android {
  compileSdk = 35
  defaultConfig { applicationId = "dev.camrtc"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "0.2.0" }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+ testOptions { unitTests.all { it.testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL; showStandardStreams = true } } }
  kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
