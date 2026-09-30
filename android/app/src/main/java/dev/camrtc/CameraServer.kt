@@ -22,7 +22,7 @@ class CameraServer(private val host: String, private val width: Int, private val
  fun start() {
   try {
    for(port in listOf(8080,8554)) {
-    val listener = ServerSocket(port); listeners.add(listener)
+    val listener = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) }; listeners.add(listener)
     pool.execute { while(active) try {
      val socket = listener.accept(); socket.soTimeout = 15000; sockets.add(socket)
      pool.execute { try { if(port == 8080) http(socket) else rtsp(socket) } catch(_: Exception) {} finally { sockets.remove(socket); socket.close() } }
@@ -71,7 +71,10 @@ class CameraServer(private val host: String, private val width: Int, private val
    if(mediaService) "<trt:GetServiceCapabilitiesResponse><trt:Capabilities SnapshotUri=\"false\" Rotation=\"false\" VideoSourceMode=\"false\" OSD=\"false\"><trt:ProfileCapabilities MaximumNumberOfProfiles=\"1\"/><trt:StreamingCapabilities RTPMulticast=\"false\" RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/></trt:Capabilities></trt:GetServiceCapabilitiesResponse>"
    else "<tds:GetServiceCapabilitiesResponse><tds:Capabilities><tds:Network IPFilter=\"false\" ZeroConfiguration=\"false\" IPVersion6=\"false\" DynDNS=\"false\"/><tds:Security TLS1.0=\"false\" TLS1.1=\"false\" TLS1.2=\"false\" HttpDigest=\"false\" UsernameToken=\"false\"/><tds:System DiscoveryResolve=\"false\" DiscoveryBye=\"false\" RemoteDiscovery=\"false\" SystemBackup=\"false\" SystemLogging=\"false\" FirmwareUpgrade=\"false\"/></tds:Capabilities></tds:GetServiceCapabilitiesResponse>"
   } else Onvif.response(operation, base, host, width,height,fps)
-  val payload = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><s:Body>$body</s:Body></s:Envelope>""".toByteArray()
+  val messageId = Regex("<(?:\\w+:)?MessageID[^>]*>([a-zA-Z0-9:._-]{1,200})<").find(request)?.groupValues?.get(1)
+  val namespace = if(mediaService) "http://www.onvif.org/ver10/media/wsdl" else "http://www.onvif.org/ver10/device/wsdl"
+  val addressing = if(messageId != null) "<s:Header><a:Action>$namespace/${operation}Response</a:Action><a:RelatesTo>$messageId</a:RelatesTo><a:MessageID>urn:uuid:${UUID.randomUUID()}</a:MessageID><a:To>http://www.w3.org/2005/08/addressing/anonymous</a:To></s:Header>" else ""
+  val payload = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">$addressing<s:Body>$body</s:Body></s:Envelope>""".toByteArray()
   val status = if(body.contains("s:Fault")) "500 Internal Server Error" else "200 OK"
   socket.getOutputStream().apply { write("HTTP/1.1 $status\r\nContent-Type: application/soap+xml; charset=utf-8\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(payload); flush() }
   report("Cam RTC · $host · ONVIF: $operation\nRTSP: rtsp://$host:8554/camera")

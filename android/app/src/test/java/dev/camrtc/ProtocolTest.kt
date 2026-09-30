@@ -23,13 +23,26 @@ class ProtocolTest {
  @Test fun rtspStreamsFragmentedH264OverTcpAndRestarts() {
   val server = CameraServer("127.0.0.1",640,480,24,{},{}); server.start()
   try {
+   DatagramSocket().use { probe ->
+    probe.soTimeout=3000
+    val message="<s:Envelope xmlns:s='http://www.w3.org/2003/05/soap-envelope' xmlns:a='http://schemas.xmlsoap.org/ws/2004/08/addressing' xmlns:d='http://schemas.xmlsoap.org/ws/2005/04/discovery'><s:Header><a:MessageID>urn:uuid:test</a:MessageID></s:Header><s:Body><d:Probe/></s:Body></s:Envelope>".toByteArray()
+    probe.send(DatagramPacket(message,message.size,InetAddress.getByName("127.0.0.1"),3702))
+    val reply=DatagramPacket(ByteArray(8192),8192); probe.receive(reply)
+    val xml=String(reply.data,0,reply.length)
+    assertTrue(xml.contains("ProbeMatches")); assertTrue(xml.contains("<a:RelatesTo>urn:uuid:test</a:RelatesTo>")); assertTrue(xml.contains("http://127.0.0.1:8080/onvif/device_service"))
+   }
+   val connection=URL("http://127.0.0.1:8080/onvif/media_service").openConnection() as HttpURLConnection
+   connection.connectTimeout=3000; connection.readTimeout=3000; connection.requestMethod="POST"; connection.doOutput=true
+   connection.outputStream.use { it.write("<s:Envelope xmlns:s='http://www.w3.org/2003/05/soap-envelope' xmlns:trt='http://www.onvif.org/ver10/media/wsdl'><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>".toByteArray()) }
+   assertEquals(200,connection.responseCode)
+   assertTrue(connection.inputStream.bufferedReader().use { it.readText() }.contains("rtsp://127.0.0.1:8554/camera")); connection.disconnect()
    server.setConfig(byteArrayOf(0,0,0,1,0x67,0x42,0,0x1f),byteArrayOf(0,0,0,1,0x68,1))
    Socket("127.0.0.1",8554).use { socket ->
     socket.soTimeout=3000
     val input=DataInputStream(socket.getInputStream()); val output=socket.getOutputStream()
     fun request(method: String, extra: String=""): String {
      output.write("$method rtsp://127.0.0.1:8554/camera RTSP/1.0\r\nCSeq: 1\r\n$extra\r\n".toByteArray()); output.flush()
-     val headers=StringBuilder(); var previous=""
+     val headers=StringBuilder()
      while(true) { val line=input.readLine() ?: error("Disconnected"); headers.append(line).append('\n'); if(line.isEmpty()) break }
      val length=Regex("Content-Length: (\\d+)").find(headers)?.groupValues?.get(1)?.toInt() ?: 0
      if(length>0) { val body=ByteArray(length); input.readFully(body); headers.append(String(body)) }
