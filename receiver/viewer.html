@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Cam RTC</title><style>
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain}#status{position:absolute;top:16px;left:16px;color:white;font:16px system-ui}
+</style></head><body><video autoplay playsinline muted></video><div id="status">Menunggu kamera…</div><script type="module">
+const status = document.querySelector('#status'), video = document.querySelector('video');
+const token = new URLSearchParams(location.search).get('token');
+let pc, pending=[], chain=Promise.resolve();
+function reset() {pc?.close();pc=null;pending=[];video.srcObject=null;status.hidden=false;}
+const ws = new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/signal?role=viewer&token='+encodeURIComponent(token??''));
+ws.onclose=()=>{reset();status.textContent='Koneksi ditutup. Refresh sumber OBS; pastikan kode benar dan hanya satu receiver.';};
+ws.onerror=()=>{status.textContent='Server tidak dapat dihubungi';};
+ws.onmessage=event=>{
+ chain=chain.then(async()=>{
+ const m=JSON.parse(event.data);
+ if(m.type==='peer-left'){reset();status.textContent='Kamera terputus. Menunggu…';return;}
+ if(m.type==='offer'){
+ const earlyIce=pending;reset();pending=earlyIce;pc=new RTCPeerConnection({iceServers:[]}); const current=pc;
+ pc.ontrack=e=>{video.srcObject=new MediaStream([e.track]);video.play().catch(()=>{});};
+ video.onplaying=()=>{status.hidden=true;};
+ pc.onicecandidate=e=>{if(e.candidate && ws.readyState===1) ws.send(JSON.stringify({type:'ice',...e.candidate.toJSON()}));};
+ pc.onconnectionstatechange=()=>{if(current.connectionState==='failed'){status.hidden=false;status.textContent='Koneksi video gagal. Stop/Mulai di HP.';}};
+ await pc.setRemoteDescription({type:'offer',sdp:m.sdp});
+ for(const ice of pending) await pc.addIceCandidate(ice); pending=[];
+ await pc.setLocalDescription(await pc.createAnswer());
+ ws.send(JSON.stringify({type:'answer',sdp:pc.localDescription.sdp}));
+ }else if(m.type==='ice'){
+ const ice={candidate:m.candidate,sdpMid:m.sdpMid,sdpMLineIndex:m.sdpMLineIndex};
+ if(pc?.remoteDescription) await pc.addIceCandidate(ice);else pending.push(ice);
+ }
+ }).catch(e=>{status.hidden=false;status.textContent='Gagal: '+e.message;});
+};
+</script></body></html>
