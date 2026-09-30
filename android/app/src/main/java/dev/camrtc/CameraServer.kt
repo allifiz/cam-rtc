@@ -36,7 +36,7 @@ class CameraServer(private val host: String, private val width: Int, private val
     while(active) try {
      val packet = DatagramPacket(bytes,bytes.size); multicast.receive(packet)
      val xml = String(packet.data,0,packet.length, Charsets.UTF_8)
-     if(Regex("<(?:\\w+:)?Probe(?:\\s|>)").containsMatchIn(xml)) {
+     if(Regex("<(?:\\w+:)?Probe(?:\\s|/?>)").containsMatchIn(xml)) {
       val id = Regex("<(?:\\w+:)?MessageID[^>]*>([^<]+)").find(xml)?.groupValues?.get(1)
       if(id != null && Regex("[a-zA-Z0-9:._-]{1,200}").matches(id)) sendDiscovery("ProbeMatches", id, packet.address, packet.port)
      }
