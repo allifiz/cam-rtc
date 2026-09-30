@@ -14,10 +14,13 @@ import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
  private lateinit var address: EditText
+ private lateinit var mode: Spinner
+ private var networkCamera: NetworkCamera? = null
  private lateinit var quality: Spinner
  private lateinit var start: Button
  private lateinit var status: TextView
  private lateinit var preview: SurfaceViewRenderer
+ private lateinit var switchCamera: Button
  private lateinit var previewToggle: Switch
  private val worker = Executors.newSingleThreadExecutor()
  private val client = OkHttpClient()
@@ -44,10 +47,11 @@ class MainActivity : Activity() {
    .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext)).createPeerConnectionFactory()
   val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,24,24,24) }
   box.addView(TextView(this).apply { text = "Cam RTC · Video saja"; textSize = 24f })
+  mode = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("WebRTC / OBS", "Kamera jaringan / Windows (uji coba)")) }; box.addView(mode)
   address = EditText(this).apply { hint = "IP PC, contoh 192.168.1.10"; setSingleLine(true) }; box.addView(address)
   quality = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("480p / 24 FPS", "720p / 30 FPS", "1080p / 30 FPS")); setSelection(1) }; box.addView(quality)
   start = Button(this).apply { text = "Mulai"; setOnClickListener { if(running) stop() else requestStart() } }; box.addView(start)
-  box.addView(Button(this).apply { text = "Ganti kamera"; setOnClickListener { worker.execute { capturer?.switchCamera(null) } } })
+  switchCamera = Button(this).apply { text = "Ganti kamera"; setOnClickListener { worker.execute { capturer?.switchCamera(null) } } }; box.addView(switchCamera)
   previewToggle = Switch(this).apply { text = "Preview kamera"; isChecked = true }; box.addView(previewToggle)
   preview = SurfaceViewRenderer(this); preview.init(egl.eglBaseContext, null)
   box.addView(preview, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -56,6 +60,16 @@ class MainActivity : Activity() {
    worker.execute { track?.let { if(enabled) it.addSink(preview) else it.removeSink(preview) } }
   }
   status = TextView(this).apply { text = "Hubungkan HP dan PC ke Wi-Fi yang sama." }; box.addView(status)
+  mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+   override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+    address.visibility = if(position == 0) View.VISIBLE else View.GONE
+    switchCamera.visibility = if(position == 0) View.VISIBLE else View.GONE
+    previewToggle.visibility = if(position == 0) View.VISIBLE else View.GONE
+    preview.visibility = if(position == 0 && previewToggle.isChecked) View.VISIBLE else View.INVISIBLE
+    status.text = if(position == 0) "Hubungkan HP dan PC ke Wi-Fi yang sama." else "Mode uji coba · kamera belakang, tanpa preview. Tekan Mulai lalu cari kamera di Windows."
+   }
+   override fun onNothingSelected(parent: AdapterView<*>?) {}
+  }
   setContentView(box)
  }
  private fun show(message: String) { runOnUiThread { status.text = message } }
@@ -64,16 +78,24 @@ class MainActivity : Activity() {
    requestPermissions(arrayOf(Manifest.permission.CAMERA), 1); return
   }
   val host = address.text.toString().trim()
-  if(!Regex("^[a-zA-Z0-9.-]+$").matches(host)) {
+  val networkMode = mode.selectedItemPosition == 1
+  if(!networkMode && !Regex("^[a-zA-Z0-9.-]+$").matches(host)) {
    show("Masukkan IP PC."); return
   }
   val preset = quality.selectedItemPosition
   val showPreview = previewToggle.isChecked
-  running = true; start.text = "Stop"; address.isEnabled = false; quality.isEnabled = false
+  running = true; start.text = "Stop"; address.isEnabled = false; quality.isEnabled = false; mode.isEnabled = false
   window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   worker.execute {
    val id = ++session
    try {
+    if(networkMode) {
+     val sizes = arrayOf(intArrayOf(640,480,24),intArrayOf(1280,720,30),intArrayOf(1920,1080,30))
+     val size = sizes[preset]
+     networkCamera = NetworkCamera(this, ::show)
+     networkCamera!!.start(size[0],size[1],size[2])
+     return@execute
+    }
     val enumerator = Camera2Enumerator(this)
     val name = enumerator.deviceNames.firstOrNull { enumerator.isBackFacing(it) } ?: enumerator.deviceNames.first()
     capturer = enumerator.createCapturer(name, null) ?: error("Kamera tidak tersedia")
@@ -153,7 +175,7 @@ class MainActivity : Activity() {
   }, MediaConstraints())
  }
  private fun stop() {
-  running=false; start.text="Mulai"; address.isEnabled=true; quality.isEnabled=true
+  running=false; start.text="Mulai"; address.isEnabled=true; quality.isEnabled=true; mode.isEnabled=true
   window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   worker.execute { cleanup() }
  }
@@ -164,6 +186,7 @@ class MainActivity : Activity() {
   old?.close(); old?.dispose()
  }
  private fun cleanup() {
+  networkCamera?.stop(); networkCamera=null
   ++session; socket?.close(1000,"Stop"); socket=null
   closePeer()
   try { capturer?.stopCapture() } catch(_: Exception) {}

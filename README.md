@@ -36,3 +36,12 @@ Uji fisik: koneksi, pergantian kamera, preview off, stop/start, cabut Wi-Fi, rec
 Android Camera2 + WebRTC EGL encoder factory → video langsung ke OBS. Node hanya meneruskan SDP/ICE. Receiver tidak meminta kamera/mikrofon dan tidak memutar audio. Tidak ada kode pairing: siapa pun di jaringan lokal yang bisa mengakses port 8787 dapat mencoba terhubung. Gunakan jaringan privat terpercaya. Server HTTP lokal belum mengenkripsi signaling.
 
 Referensi: https://github.com/webrtc-sdk/android dan https://obsproject.com/kb/browser-source
+
+## Kamera jaringan Windows (eksperimental, v0.2.0)
+Pilih **Kamera jaringan / Windows (uji coba)** di HP, mulai dari **480p / 24 FPS**, lalu tekan **Mulai**. IP PC tidak diperlukan. HP dan PC harus berada pada LAN yang sama, tanpa client isolation. Di Windows 11 buka Settings → Bluetooth & devices → Cameras → Add a network camera → Search for cameras, lalu pilih Cam RTC. Tidak membutuhkan receiver Node, OBS, mikrofon, atau kode pairing. Windows tetap melakukan proses menambahkan perangkat kamera.
+
+Mode ini memakai Camera2 → surface MediaCodec H.264 → RTP/RTSP TCP, ditambah layanan ONVIF device/media dan WS-Discovery. Hanya satu mode streaming aktif. Kamera belakang, tanpa preview lokal atau pergantian kamera dalam mode jaringan; aplikasi harus tetap terbuka dan layar menyala. Video mengikuti orientasi sensor kamera (rotasi/portrait belum dikoreksi pada mode ini). Stop melepas kamera, encoder, koneksi, port, dan multicast lock.
+
+Port HP: UDP 3702 (discovery multicast 239.255.255.250), TCP 8080 (ONVIF), TCP 8554 (RTSP). Jika discovery gagal, periksa jaringan privat Windows, firewall, VPN, dan isolasi Wi-Fi. Untuk membedakan kegagalan streaming dari discovery, buka URL `rtsp://IP_HP:8554/camera` di VLC dengan transport RTP over RTSP/TCP. URL dan IP terlihat di aplikasi saat kamera aktif.
+
+Implementasi ONVIF ini subset eksperimental, **belum tersertifikasi Profile S**. Build/unit test tidak membuktikan discovery/pairing Windows, decoding pada Vivo Y22, atau kompatibilitas OmeTV; semuanya perlu uji perangkat nyata. Windows dapat meminta operasi ONVIF tambahan: catat status operasi terakhir di HP jika penambahan gagal. Mode ini tidak menerapkan autentikasi, sesuai penggunaan LAN pribadi. Background removal OBS tidak ikut terbawa karena stream berasal langsung dari kamera HP.
