@@ -1,7 +1,7 @@
-export function parseJoin(url, token) {
+export function parseJoin(url) {
   const u = new URL(url, 'http://localhost');
   const role = u.searchParams.get('role');
-  return u.pathname === '/signal' && u.searchParams.get('token') === token &&
+  return u.pathname === '/signal' &&
     ['sender', 'viewer'].includes(role) ? role : null;
 }
 export function validSignal(value) {

@@ -1,10 +1,8 @@
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
-import {randomBytes} from 'node:crypto';
 import {networkInterfaces} from 'node:os';
 import {WebSocketServer, WebSocket} from 'ws';
 import {parseJoin, validSignal} from './protocol.mjs';
-const token = randomBytes(12).toString('hex');
 const port = 8787;
 const page = await readFile(new URL('./viewer.html', import.meta.url));
 const server = http.createServer((req,res) => {
@@ -15,7 +13,7 @@ const wss = new WebSocketServer({noServer:true,maxPayload:110000});
 const peers = new Map();
 const send = (ws,msg) => {if(ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));};
 server.on('upgrade',(req,socket,head) => {
- const role = parseJoin(req.url,token);
+ const role = parseJoin(req.url);
  if (!role || peers.has(role)) {socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');socket.destroy();return;}
  wss.handleUpgrade(req,socket,head,ws => {
   peers.set(role,ws);
@@ -42,8 +40,7 @@ server.on('upgrade',(req,socket,head) => {
  });
 });
 server.listen(port,'0.0.0.0',() => {
- console.log('Pairing code: '+token);
  for(const rows of Object.values(networkInterfaces())) for(const ip of rows ?? [])
   if(ip.family === 'IPv4' && !ip.internal) console.log('Android PC address: '+ip.address);
- console.log('OBS URL: http://127.0.0.1:'+port+'/?token='+token);
+ console.log('OBS URL: http://127.0.0.1:'+port+'/');
 });

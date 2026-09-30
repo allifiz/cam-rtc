@@ -14,7 +14,6 @@ import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
  private lateinit var address: EditText
- private lateinit var token: EditText
  private lateinit var quality: Spinner
  private lateinit var start: Button
  private lateinit var status: TextView
@@ -32,6 +31,7 @@ class MainActivity : Activity() {
  private var helper: SurfaceTextureHelper? = null
  private var running = false
  @Volatile private var session = 0
+ private var negotiation = 0
  private var remoteReady = false
  private val iceQueue = mutableListOf<IceCandidate>()
 
@@ -45,7 +45,6 @@ class MainActivity : Activity() {
   val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,24,24,24) }
   box.addView(TextView(this).apply { text = "Cam RTC · Video saja"; textSize = 24f })
   address = EditText(this).apply { hint = "IP PC, contoh 192.168.1.10"; setSingleLine(true) }; box.addView(address)
-  token = EditText(this).apply { hint = "Kode pairing dari terminal PC"; setSingleLine(true) }; box.addView(token)
   quality = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("480p / 24 FPS", "720p / 30 FPS", "1080p / 30 FPS")); setSelection(1) }; box.addView(quality)
   start = Button(this).apply { text = "Mulai"; setOnClickListener { if(running) stop() else requestStart() } }; box.addView(start)
   box.addView(Button(this).apply { text = "Ganti kamera"; setOnClickListener { worker.execute { capturer?.switchCamera(null) } } })
@@ -65,13 +64,12 @@ class MainActivity : Activity() {
    requestPermissions(arrayOf(Manifest.permission.CAMERA), 1); return
   }
   val host = address.text.toString().trim()
-  val code = token.text.toString().trim()
-  if(!Regex("^[a-zA-Z0-9.-]+$").matches(host) || !Regex("^[a-fA-F0-9]{24}$").matches(code)) {
-   show("Masukkan IP PC dan kode pairing 24 karakter."); return
+  if(!Regex("^[a-zA-Z0-9.-]+$").matches(host)) {
+   show("Masukkan IP PC."); return
   }
   val preset = quality.selectedItemPosition
   val showPreview = previewToggle.isChecked
-  running = true; start.text = "Stop"; address.isEnabled = false; token.isEnabled = false; quality.isEnabled = false
+  running = true; start.text = "Stop"; address.isEnabled = false; quality.isEnabled = false
   window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   worker.execute {
    val id = ++session
@@ -86,7 +84,7 @@ class MainActivity : Activity() {
     if(showPreview) track!!.addSink(preview)
     val sizes = arrayOf(intArrayOf(640,480,24),intArrayOf(1280,720,30),intArrayOf(1920,1080,30))
     val size = sizes[preset]; capturer!!.startCapture(size[0],size[1],size[2])
-    socket = client.newWebSocket(Request.Builder().url("ws://$host:8787/signal?role=sender&token=$code").build(), object : WebSocketListener() {
+    socket = client.newWebSocket(Request.Builder().url("ws://$host:8787/signal?role=sender").build(), object : WebSocketListener() {
      override fun onOpen(webSocket: WebSocket, response: Response) { show("Menunggu receiver OBS…") }
      override fun onMessage(webSocket: WebSocket, text: String) { worker.execute {
       if(id != session) return@execute
@@ -94,20 +92,24 @@ class MainActivity : Activity() {
        val msg = JSONObject(text)
        when(msg.getString("type")) {
         "ready" -> offer()
-        "answer" -> peer?.setRemoteDescription(object : SdpAdapter() {
+        "answer" -> {
+         val current = peer
+         val generation = negotiation
+         current?.setRemoteDescription(object : SdpAdapter() {
          override fun onSetSuccess() { worker.execute {
-          if(id == session) { remoteReady = true; iceQueue.forEach { peer?.addIceCandidate(it) }; iceQueue.clear() }
+          if(id == session && generation == negotiation && current === peer) { remoteReady = true; iceQueue.forEach { current?.addIceCandidate(it) }; iceQueue.clear() }
          } }
          override fun onSetFailure(error: String?) { show("SDP gagal: $error") }
         }, SessionDescription(SessionDescription.Type.ANSWER,msg.getString("sdp")))
+        }
         "ice" -> { val ice = IceCandidate(msg.getString("sdpMid"),msg.getInt("sdpMLineIndex"),msg.getString("candidate"))
          if(remoteReady) peer?.addIceCandidate(ice) else iceQueue.add(ice)
         }
-        "peer-left" -> { peer?.close(); peer?.dispose(); peer=null; remoteReady=false; iceQueue.clear(); show("Receiver ditutup. Menunggu OBS…") }
+        "peer-left" -> { closePeer(); show("Receiver ditutup. Menunggu OBS…") }
        }
       } catch(e: Exception) { show("Signaling gagal: ${e.message}") }
      } }
-     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { runOnUiThread { if(id == session) { stop(); show("Koneksi gagal: ${t.message}. Periksa IP, kode, dan firewall.") } } }
+     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { runOnUiThread { if(id == session) { stop(); show("Koneksi gagal: ${t.message}. Periksa IP dan firewall.") } } }
      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { runOnUiThread { if(id == session) { stop(); show("Koneksi ditutup: $reason") } } }
     })
    } catch(e: Exception) { runOnUiThread { stop(); show("Kamera gagal: ${e.message}") } }
@@ -115,11 +117,14 @@ class MainActivity : Activity() {
  }
  private fun send(msg: JSONObject) { socket?.send(msg.toString()) }
  private fun offer() {
-  peer?.close(); peer?.dispose(); remoteReady=false; iceQueue.clear()
+  closePeer()
+  val generation = negotiation
   val id = session
   val config = PeerConnection.RTCConfiguration(emptyList<PeerConnection.IceServer>()).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
   peer = factory.createPeerConnection(config, object : PeerConnection.Observer {
-   override fun onIceCandidate(c: IceCandidate) { send(JSONObject().put("type","ice").put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex)) }
+   override fun onIceCandidate(c: IceCandidate) { worker.execute {
+    if(id == session && generation == negotiation) send(JSONObject().put("type","ice").put("candidate",c.sdp).put("sdpMid",c.sdpMid).put("sdpMLineIndex",c.sdpMLineIndex))
+   } }
    override fun onConnectionChange(state: PeerConnection.PeerConnectionState) { show("Video: $state") }
    override fun onSignalingChange(s: PeerConnection.SignalingState) {}
    override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {}
@@ -133,11 +138,14 @@ class MainActivity : Activity() {
    override fun onAddTrack(r: RtpReceiver, streams: Array<out MediaStream>) {}
   }) ?: error("PeerConnection gagal")
   peer!!.addTransceiver(track!!, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY))
-  peer!!.createOffer(object : SdpAdapter() {
+  val current = peer!!
+  current.createOffer(object : SdpAdapter() {
    override fun onCreateSuccess(sdp: SessionDescription) { worker.execute {
-    if(id != session) return@execute
-    peer?.setLocalDescription(object : SdpAdapter() {
-     override fun onSetSuccess() { if(id == session) send(JSONObject().put("type","offer").put("sdp",sdp.description)) }
+    if(id != session || generation != negotiation || current !== peer) return@execute
+    current.setLocalDescription(object : SdpAdapter() {
+     override fun onSetSuccess() { worker.execute {
+      if(id == session && generation == negotiation && current === peer) send(JSONObject().put("type","offer").put("sdp",sdp.description))
+     } }
      override fun onSetFailure(error: String?) { show("SDP lokal gagal: $error") }
     }, sdp)
    } }
@@ -145,13 +153,19 @@ class MainActivity : Activity() {
   }, MediaConstraints())
  }
  private fun stop() {
-  running=false; start.text="Mulai"; address.isEnabled=true; token.isEnabled=true; quality.isEnabled=true
+  running=false; start.text="Mulai"; address.isEnabled=true; quality.isEnabled=true
   window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   worker.execute { cleanup() }
  }
+ private fun closePeer() {
+  ++negotiation
+  val old = peer; peer = null
+  remoteReady=false; iceQueue.clear()
+  old?.close(); old?.dispose()
+ }
  private fun cleanup() {
   ++session; socket?.close(1000,"Stop"); socket=null
-  peer?.close(); peer?.dispose(); peer=null
+  closePeer()
   try { capturer?.stopCapture() } catch(_: Exception) {}
   capturer?.dispose(); capturer=null
   track?.removeSink(preview); track?.dispose(); track=null

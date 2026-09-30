@@ -1,9 +1,11 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {parseJoin, validSignal} from './protocol.mjs';
-test('requires token and valid role/path', () => {
- assert.equal(parseJoin('/signal?role=sender&token=abc','abc'),'sender');
- for (const u of ['/signal?role=sender&token=bad','/signal?role=admin&token=abc','/bad?role=viewer&token=abc']) assert.equal(parseJoin(u,'abc'),null);
+test('accepts token-free clients and rejects invalid roles/paths', () => {
+ assert.equal(parseJoin('/signal?role=sender'),'sender');
+ assert.equal(parseJoin('/signal?role=viewer'),'viewer');
+ assert.equal(parseJoin('/signal?role=viewer&token=legacy'),'viewer');
+ for (const u of ['/signal?role=admin','/bad?role=viewer','/signal']) assert.equal(parseJoin(u),null);
 });
 test('rejects malformed signaling', () => {
  assert.ok(validSignal({type:'offer',sdp:'v=0'}));

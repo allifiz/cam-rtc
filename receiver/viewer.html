@@ -2,11 +2,10 @@
 html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain}#status{position:absolute;top:16px;left:16px;color:white;font:16px system-ui}
 </style></head><body><video autoplay playsinline muted></video><div id="status">Menunggu kamera…</div><script type="module">
 const status = document.querySelector('#status'), video = document.querySelector('video');
-const token = new URLSearchParams(location.search).get('token');
 let pc, pending=[], chain=Promise.resolve();
 function reset() {pc?.close();pc=null;pending=[];video.srcObject=null;status.hidden=false;}
-const ws = new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/signal?role=viewer&token='+encodeURIComponent(token??''));
-ws.onclose=()=>{reset();status.textContent='Koneksi ditutup. Refresh sumber OBS; pastikan kode benar dan hanya satu receiver.';};
+const ws = new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/signal?role=viewer');
+ws.onclose=()=>{reset();status.textContent='Koneksi ditutup. Refresh sumber OBS; pastikan hanya satu receiver.';};
 ws.onerror=()=>{status.textContent='Server tidak dapat dihubungi';};
 ws.onmessage=event=>{
  chain=chain.then(async()=>{
